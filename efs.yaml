@@ -1,0 +1,270 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+
+  # FileSystem Parameters
+  Encryption:
+    Type: String
+    Description: Enable Encryption for the FileSystem?  (Default - true)
+    ConstraintDescription: Must be a boolean value (true / false)
+    AllowedValues:
+      - true
+      - false
+    Default: true
+
+  FileSystemName:
+    Type: String
+    Description: Name for tagging the EFS FileSystem (Default - CloudFormationStackNameFileSystem)
+    Default: " "
+
+  PerformanceMode:
+    Type: String
+    Description: What performance mode would you like? (Default - generalPurpose)
+    ConstraintDescription: generalPurpose and maxIO are the only valid options
+    AllowedValues:
+      - "generalPurpose"
+      - "maxIO"
+    Default: "generalPurpose"
+
+  ThroughputMode:
+    Type: String
+    Description: What throughput mode would you like to use?  (Default - bursting)
+    ConstraintDescription: The only valid options are bursting and provisioned
+    AllowedValues:
+      - "bursting"
+      - "provisioned"
+    Default: "bursting"  
+
+  KmsKeyId:
+  # Format for the KMS Key Id can be one of the following: 
+  # -----------------------------------------------------
+  # Key ID - A unique identifier of the key, for example, 1234abcd-12ab-34cd-56ef-1234567890ab.
+  # ARN - An Amazon Resource Name (ARN) for the key, for example, arn:aws:kms:us-west-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab.
+  # Key alias - A previously created display name for a key. For example, alias/projectKey1.
+  # Key alias ARN - An ARN for a key alias, for example, arn:aws:kms:us-west-2:444455556666:alias/projectKey1.
+    Type: String
+    Description: Would you like to use a non-default KMS key?  (Provide key id, ARN, or alias)
+    Default: "None"
+
+  # Mount Target Parameters
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Which VPC would you like to use?
+
+  MountTarget1Subnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: Which subnet would you like to use for your first Mount Target?
+
+  MountTarget2Subnet:
+    Type: String
+    Description: Which subnet would you like to use for your second Mount Target? (enter a valid subnet id)
+    Default: "subnet-00000000"
+    AllowedPattern: ^subnet-[a-z0-9]{8,18}$
+
+  MountTarget3Subnet:
+    Type: String
+    Description: Which subnet would you like to use for your third Mount Target? (enter a valid subnet id)
+    Default: "subnet-00000000"
+    AllowedPattern: ^subnet-[a-z0-9]{8,18}$
+
+  FileSharePort: 
+    Type: Number
+    Description: Port to use for accessing the FileSystem via a Mount Target
+    Default: 2049 # NFS Default Port Number
+    MinValue: 1024
+    MaxValue: 65535
+
+  OriginSecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Which SecurityGroup will be allowed to access Mount Targets for the FileSystem
+
+
+Metadata:
+
+  Authors:
+    Description:  Will Nave (will@1strategy.com)
+
+  Purpose:
+    Description: "This template is used to create a stack that implements a minimum of one EFS FileSystem, 
+                  a single Mount Target, and a VPC Security Group associated with Mount targets.  In its 
+                  current state the template is capable of provisioning up to three Mount Targets associated
+                  with the EFS FileSystem.
+                  
+                  All Origin Security Groups designated for access to the Mount Target Security Group 
+                  must exist in a subnet within the same VPC as the Mount Target(s), and/or be routable
+                  from within the VPC associated with the Mount Target Security Group."
+
+  License:
+    Description: 'Copyright 2019 1Strategy
+
+                  Licensed under the Apache License, Version 2.0 (the "License");
+                  you may not use this file except in compliance with the License.
+                  You may obtain a copy of the License at
+
+                      http://www.apache.org/licenses/LICENSE-2.0
+
+                  Unless required by applicable law or agreed to in writing, software
+                  distributed under the License is distributed on an "AS IS" BASIS,
+                  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+                  See the License for the specific language governing permissions and
+                  limitations under the License.'
+
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "FileSystem Parameters"
+        Parameters:
+          - Encryption
+          - FileSystemName
+          - PerformanceMode
+          - ThroughputMode
+          - KmsKeyId   
+      -   
+        Label:
+          default: "FileSystem Mount Target Parameters"
+        Parameters:
+          - VpcId
+          - MountTarget1Subnet
+          - MountTarget2Subnet
+          - MountTarget3Subnet
+          - FileSharePort
+          - OriginSecurityGroup
+    ParameterLabels:
+      Encryption:
+        default: "Encryption"
+      FileSystemName:
+        default: "FileSystem Name"
+      PerformanceMode:
+        default: "Performance Mode"
+      ThroughputMode: 
+        default: "Throughput Mode"
+      KmsKeyId:
+        default: "KMS Key"
+      VpcId:
+        default: "VPC Id"
+      MountTarget1Subnet:
+        default: "Mount Target 1 Subnet"
+      MountTarget2Subnet:
+        default: "Mount Target 2 Subnet (optional)"
+      MountTarget3Subnet:
+        default: "Mount Target 3 Subnet (optional)"
+      FileSharePort:
+        default: "Access Port for FileShare"
+      OriginSecurityGroup:
+        default: "Origin Security Group"
+
+Conditions:
+
+  # FileSystem Conditions
+  hasFsTags: 
+    !Not [!Equals [!Ref FileSystemName, " "]]
+  
+  isEncrypted:
+    !Equals [!Ref Encryption, true]
+
+  noKmsKeyId:
+    !Equals [!Ref KmsKeyId, "None"]
+
+  useDefaultCMK: !And
+    - Condition: isEncrypted
+    - Condition: noKmsKeyId
+
+  # Mount Target Conditions
+  createSecondMountTarget:
+    !Not [!Equals [!Ref MountTarget2Subnet, "subnet-0000000000000000"]]
+
+  createThirdMountTarget:
+    !Not [!Equals [!Ref MountTarget3Subnet, "subnet-0000000000000000"]]
+    
+Resources:
+
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: !Ref Encryption
+      FileSystemTags:
+        - Key: Name
+          Value: !If [hasFsTags, !Ref FileSystemName, !Sub "${AWS::StackName}FileSystem"]
+      KmsKeyId: !If [useDefaultCMK, !Ref "AWS::NoValue", !Ref KmsKeyId]
+      PerformanceMode: !Ref PerformanceMode
+      ThroughputMode: !Ref ThroughputMode
+
+  MountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties: 
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Ref MountTarget1Subnet
+      SecurityGroups: 
+        - !Ref MountTargetSecurityGroup
+
+  MountTarget2:
+    Condition: createSecondMountTarget
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Ref MountTarget2Subnet
+      SecurityGroups:
+        - !Ref MountTargetSecurityGroup
+
+  MountTarget3:
+    Condition: createThirdMountTarget
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Ref MountTarget3Subnet
+      SecurityGroups:
+        - !Ref MountTargetSecurityGroup
+
+  MountTargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: FileSystem Security Group
+      VpcId: !Ref VpcId
+      GroupName: !If [hasFsTags, !Join ["", [!Ref FileSystemName, "SecurityGroup"]], !Join ["", [!Ref "AWS::StackName", "FileSystemSecurityGroup"]]]
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: !Ref FileSharePort
+          ToPort: !Ref FileSharePort
+          SourceSecurityGroupId: !Ref OriginSecurityGroup
+
+
+Outputs:
+
+  FileSystemId:
+    Description: The FileSystem ID number
+    Value: !Ref FileSystem
+    Export:
+      Name: !Sub '${AWS::StackName}FileSystemId'
+
+  MountTargetSecurityGroup:
+    Description: The Group ID for the FileSystem Mount Targets Security Group
+    Value: !GetAtt MountTargetSecurityGroup.GroupId
+    Export:
+      Name: MountTargetSecurityGroupId
+    
+  MountTarget1:
+    Description: The Resource ID for the first FileSystem Mount Target
+    Value: !Ref MountTarget1
+    Export:
+      Name: !Sub 
+        - '${AWS::StackName}${FileSystemName}MountTarget1'
+        - { FileSystemName: !If [hasFsTags, !Ref FileSystemName, "FileSystem"] }
+
+  MountTarget2:
+    Condition: createSecondMountTarget
+    Description: The Resource ID for the second FileSystem Mount Target
+    Value: !Ref MountTarget2
+    Export: 
+      Name: !Sub 
+        - '${AWS::StackName}${FileSystemName}MountTarget2'
+        - { FileSystemName: !If [hasFsTags, !Ref FileSystemName, "FileSystem"] }
+
+  MountTarget3:
+    Condition: createThirdMountTarget
+    Description: The Resource ID for the third FileSystem Mount Target
+    Value: !Ref MountTarget3
+    Export: 
+      Name: !Sub 
+        - '${AWS::StackName}${FileSystemName}MountTarget23'
+        - { FileSystemName: !If [hasFsTags, !Ref FileSystemName, "FileSystem"] }
