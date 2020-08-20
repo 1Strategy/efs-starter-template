@@ -35,6 +35,12 @@ Parameters:
       - "provisioned"
     Default: "bursting"  
 
+  ProvisionedThroughputInMibps:
+    Type: Double
+    Description: If provisioned ThroughputMode is selected above, this value will be used, otherwise it will be ignored.
+    AllowedPattern: ^[0-9]+.[0-9]+$ 
+    Default: 0.0
+
   KmsKeyId:
   # Format for the KMS Key Id can be one of the following: 
   # -----------------------------------------------------
@@ -119,6 +125,7 @@ Metadata:
           - FileSystemName
           - PerformanceMode
           - ThroughputMode
+          - ProvisionedThroughputInMibps
           - KmsKeyId   
       -   
         Label:
@@ -166,6 +173,9 @@ Conditions:
   noKmsKeyId:
     !Equals [!Ref KmsKeyId, "None"]
 
+  provisionedThroughputMode:
+    !Equals [!Ref ThroughputMode, 'provisioned']
+
   useDefaultCMK: !And
     - Condition: isEncrypted
     - Condition: noKmsKeyId
@@ -189,6 +199,7 @@ Resources:
       KmsKeyId: !If [useDefaultCMK, !Ref "AWS::NoValue", !Ref KmsKeyId]
       PerformanceMode: !Ref PerformanceMode
       ThroughputMode: !Ref ThroughputMode
+      ProvisionedThroughputInMibps: !If [provisionedThroughputMode, !Ref ProvisionedThroughputInMibps, !Ref 'AWS::NoValue']
 
   MountTarget1:
     Type: AWS::EFS::MountTarget
